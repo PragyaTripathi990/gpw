@@ -2,8 +2,8 @@
 Analysis Router — Main API endpoints for document analysis.
 All Google Cloud services are OPTIONAL — app works with just Gemini API key.
 """
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from typing import Optional
 
 from backend.services.document_parser import parse_document
@@ -57,6 +57,22 @@ async def analyze_contract(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+
+@router.post("/report/pdf")
+async def generate_report(request: Request):
+    """Generate a downloadable PDF risk report."""
+    try:
+        from backend.services.pdf_report import generate_pdf_report
+        data = await request.json()
+        pdf_bytes = generate_pdf_report(data)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=LexGuard_Risk_Report.pdf"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
 
 
 @router.get("/health")

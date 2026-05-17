@@ -19,6 +19,7 @@ import {
   Languages,
   Loader2,
   Sparkles,
+  Download,
 } from "lucide-react";
 import axios from "axios";
 
@@ -695,17 +696,39 @@ export default function Home() {
             <Shield className="w-8 h-8 text-purple-500" />
             <h1 className="text-xl font-bold gradient-text">LEXGUARD</h1>
           </div>
-          <button
-            onClick={() => {
-              setResult(null);
-              setFile(null);
-              setUrl("");
-              setRawText("");
-            }}
-            className="px-4 py-2 rounded-lg bg-white/10 text-sm text-gray-300 hover:bg-white/20 transition"
-          >
-            Analyze Another
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={async () => {
+                try {
+                  const res = await axios.post(`${API_URL}/api/report/pdf`, result, {
+                    responseType: 'blob',
+                  });
+                  const url = window.URL.createObjectURL(new Blob([res.data]));
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', 'LexGuard_Risk_Report.pdf');
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch { alert('PDF generation failed'); }
+              }}
+              className="px-4 py-2 rounded-lg bg-purple-600 text-sm text-white hover:bg-purple-700 transition flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Download Report
+            </button>
+            <button
+              onClick={() => {
+                setResult(null);
+                setFile(null);
+                setUrl("");
+                setRawText("");
+              }}
+              className="px-4 py-2 rounded-lg bg-white/10 text-sm text-gray-300 hover:bg-white/20 transition"
+            >
+              Analyze Another
+            </button>
+          </div>
         </div>
       </header>
 

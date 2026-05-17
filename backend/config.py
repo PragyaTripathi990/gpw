@@ -14,8 +14,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "lexguard-uploads")
 
 # Model Settings
-GEMINI_PRO_MODEL = "gemini-2.5-pro"
-GEMINI_FLASH_MODEL = "gemini-2.5-flash"
+GEMINI_PRO_MODEL = "gemini-2.0-flash"
+GEMINI_FLASH_MODEL = "gemini-2.0-flash"
 
 # Risk Thresholds
 CRITICAL_RISK_THRESHOLD = 8

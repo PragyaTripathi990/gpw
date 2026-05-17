@@ -1,344 +1,318 @@
 """
 LexGuard Multi-Agent Adversarial Pipeline
-Uses Google Gemini for the adversarial debate system.
+==========================================
+Supports BOTH Google Gemini and OpenAI as LLM backend.
+Set LLM_PROVIDER=openai in .env to use OpenAI, otherwise defaults to Gemini.
+
+For hackathon demo: switch back to Gemini when quota resets.
 """
 import json
 import asyncio
-import google.generativeai as genai
-from typing import Optional
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "gemini" or "openai" or "groq"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
 from .prompts import (
     CLAUSE_SEGMENTATION_PROMPT,
-    CORPORATE_LAWYER_PROMPT,
-    CONSUMER_ADVOCATE_PROMPT,
-    JUDGE_PROMPT,
-    SIMPLIFIER_PROMPT,
-    OVERALL_SUMMARY_PROMPT,
-    SCENARIO_SIMULATION_PROMPT,
-    NEGOTIATION_PROMPT,
     CONTRADICTION_DETECTION_PROMPT,
+    OVERALL_SUMMARY_PROMPT,
 )
-from backend.config import GEMINI_API_KEY, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL
 
-# RAG + Embeddings (optional — gracefully degrades)
+# RAG knowledge base (local, no API calls)
 try:
-    from backend.services.legal_knowledge_base import retrieve_relevant_knowledge, FAIR_CLAUSE_BENCHMARKS
+    from backend.services.legal_knowledge_base import retrieve_relevant_knowledge
     HAS_RAG = True
 except Exception:
     HAS_RAG = False
 
 
-def configure_gemini():
-    """Configure the Gemini API."""
-    genai.configure(api_key=GEMINI_API_KEY)
-
-
-def get_model(model_name: str = GEMINI_FLASH_MODEL):
-    """Get a Gemini model instance."""
-    return genai.GenerativeModel(model_name)
-
-
-async def call_gemini(prompt: str, model_name: str = GEMINI_FLASH_MODEL, retries: int = 3) -> str:
-    """Make an async call to Gemini with retry on rate limit."""
-    model = get_model(model_name)
-    for attempt in range(retries):
-        try:
-            response = await asyncio.to_thread(
-                model.generate_content,
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=4096,
-                )
-            )
-            return response.text
-        except Exception as e:
-            if "429" in str(e) and attempt < retries - 1:
-                wait = (attempt + 1) * 15
-                print(f"Rate limited, waiting {wait}s...")
-                await asyncio.sleep(wait)
-            else:
-                raise
-
-
-async def call_gemini_json(prompt: str, model_name: str = GEMINI_FLASH_MODEL, retries: int = 3) -> dict:
-    """Make a Gemini call and parse JSON response with retry."""
-    model = get_model(model_name)
-    for attempt in range(retries):
-        try:
-            response = await asyncio.to_thread(
-                model.generate_content,
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json",
-                )
-            )
-            try:
-                return json.loads(response.text)
-            except json.JSONDecodeError:
-                text = response.text
-                start = text.find('[') if text.find('[') < text.find('{') or text.find('{') == -1 else text.find('{')
-                end = text.rfind(']') + 1 if start == text.find('[') else text.rfind('}') + 1
-                if start != -1 and end > start:
-                    return json.loads(text[start:end])
-                raise
-        except Exception as e:
-            if "429" in str(e) and attempt < retries - 1:
-                wait = (attempt + 1) * 15
-                print(f"Rate limited, waiting {wait}s...")
-                await asyncio.sleep(wait)
-            else:
-                raise
-
-
 # ============================================================
-# STAGE 1: Clause Segmentation
+# LLM CALL LAYER — supports Gemini, OpenAI, and Groq
 # ============================================================
-async def segment_clauses(document_text: str) -> list[dict]:
-    """Split document into individual clauses using Gemini."""
-    prompt = CLAUSE_SEGMENTATION_PROMPT.format(document_text=document_text[:15000])
-    result = await call_gemini_json(prompt, GEMINI_FLASH_MODEL)
-    if isinstance(result, dict):
-        result = [result]
-    return result
+
+_groq_client = None
+_openai_client = None
+
+def _get_groq():
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
+
+def _get_openai():
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
 
 
-# ============================================================
-# STAGE 2: Adversarial Analysis (per clause)
-# ============================================================
-async def run_corporate_lawyer(clause: dict, doc_type: str, rag_context: str = "") -> str:
-    """Agent 1: Corporate Lawyer — defends the clause."""
-    rag_section = ""
-    if rag_context:
-        rag_section = f"\nRELEVANT LEGAL KNOWLEDGE (for reference):\n{rag_context}\n"
-    prompt = CORPORATE_LAWYER_PROMPT.format(
-        category=clause.get("category", "OTHER"),
-        title=clause.get("title", "Unknown"),
-        clause_text=clause.get("text", ""),
-        doc_type=doc_type,
-        rag_context=rag_section,
-    )
-    return await call_gemini(prompt, GEMINI_FLASH_MODEL)
-
-
-async def run_consumer_advocate(clause: dict, doc_type: str, rag_context: str = "") -> str:
-    """Agent 2: Consumer Advocate — attacks the clause."""
-    rag_section = ""
-    if rag_context:
-        rag_section = f"\nRELEVANT LEGAL KNOWLEDGE & BENCHMARKS (use these to compare):\n{rag_context}\n"
-    prompt = CONSUMER_ADVOCATE_PROMPT.format(
-        category=clause.get("category", "OTHER"),
-        title=clause.get("title", "Unknown"),
-        clause_text=clause.get("text", ""),
-        doc_type=doc_type,
-        rag_context=rag_section,
-    )
-    return await call_gemini(prompt, GEMINI_FLASH_MODEL)
-
-
-async def run_judge(clause: dict, defense: str, prosecution: str) -> dict:
-    """Agent 3: Judge — delivers verdict."""
-    prompt = JUDGE_PROMPT.format(
-        title=clause.get("title", "Unknown"),
-        category=clause.get("category", "OTHER"),
-        clause_text=clause.get("text", ""),
-        defense_argument=defense,
-        prosecution_argument=prosecution,
-    )
-    return await call_gemini_json(prompt, GEMINI_FLASH_MODEL)
-
-
-async def run_simplifier(clause: dict, risk_score: int) -> str:
-    """Agent 4: Simplifier — translates to plain English."""
-    prompt = SIMPLIFIER_PROMPT.format(
-        clause_text=clause.get("text", ""),
-        risk_score=risk_score,
-    )
-    return await call_gemini(prompt, GEMINI_FLASH_MODEL)
-
-
-# ============================================================
-# STAGE 3: Full adversarial analysis for one clause
-# ============================================================
-async def run_scenario_simulation(clause: dict, risk_score: int) -> list:
-    """Agent 5: Scenario Simulator — shows real-world consequences."""
-    if risk_score < 5:
-        return []  # Skip for safe clauses
-    prompt = SCENARIO_SIMULATION_PROMPT.format(
-        clause_text=clause.get("text", ""),
-        category=clause.get("category", "OTHER"),
-        risk_score=risk_score,
-    )
+def _parse_json_safe(text: str) -> dict:
+    """Parse JSON from LLM response, handling markdown code blocks."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
     try:
-        return await call_gemini_json(prompt, GEMINI_FLASH_MODEL)
-    except Exception:
-        return []
-
-
-async def run_negotiation_advisor(clause: dict, risk_score: int, key_issues: str) -> dict:
-    """Agent 6: Negotiation Advisor — suggests how to negotiate."""
-    if risk_score < 5:
-        return {}  # Skip for safe clauses
-    prompt = NEGOTIATION_PROMPT.format(
-        clause_text=clause.get("text", ""),
-        category=clause.get("category", "OTHER"),
-        risk_score=risk_score,
-        key_issues=key_issues,
-    )
-    try:
-        return await call_gemini_json(prompt, GEMINI_FLASH_MODEL)
-    except Exception:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find('{') if '{' in text else text.find('[')
+        end = max(text.rfind('}'), text.rfind(']')) + 1
+        if start != -1 and end > start:
+            return json.loads(text[start:end])
         return {}
 
 
+async def call_llm_json(prompt: str) -> dict:
+    """Call LLM and get JSON response."""
+    if LLM_PROVIDER == "groq":
+        client = _get_groq()
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt + "\n\nRespond with ONLY valid JSON, no markdown."}],
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=8000,
+        )
+        return _parse_json_safe(response.choices[0].message.content)
+    elif LLM_PROVIDER == "openai":
+        client = _get_openai()
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=8192,
+        )
+        return json.loads(response.choices[0].message.content)
+    else:
+        import google.generativeai as genai
+        from backend.config import GEMINI_API_KEY, GEMINI_FLASH_MODEL
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+        response = await asyncio.to_thread(
+            model.generate_content, prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.4, max_output_tokens=8192,
+                response_mime_type="application/json",
+            )
+        )
+        return json.loads(response.text)
+
+
+async def call_llm_text(prompt: str) -> str:
+    """Call LLM and get text response."""
+    if LLM_PROVIDER == "groq":
+        client = _get_groq()
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content
+    elif LLM_PROVIDER == "openai":
+        client = _get_openai()
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content
+    else:
+        import google.generativeai as genai
+        from backend.config import GEMINI_API_KEY, GEMINI_FLASH_MODEL
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+        response = await asyncio.to_thread(
+            model.generate_content, prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7, max_output_tokens=4096,
+            )
+        )
+        return response.text
+
+
+# ============================================================
+# COMBINED PROMPT: All 6 agents in ONE call per clause
+# ============================================================
+COMBINED_ANALYSIS_PROMPT = """You are LexGuard, an AI legal analysis system with multiple expert personas.
+Analyze this contract clause by role-playing as ALL of the following experts:
+
+CLAUSE TITLE: {title}
+CATEGORY: {category}
+DOCUMENT TYPE: {doc_type}
+CLAUSE TEXT: "{clause_text}"
+{rag_section}
+
+Return a JSON object with these keys:
+
+{{
+  "defense": "[As CORPORATE LAWYER: 2-3 paragraphs defending this clause as standard and justified]",
+  "prosecution": "[As CONSUMER ADVOCATE: 2-3 paragraphs attacking all risks - exploitative terms, hidden costs, one-sided liability, privacy issues, rights waivers. Give real-world examples]",
+  "verdict": {{
+    "risk_score": <1-10, where 10=critical>,
+    "risk_types": ["EXPLOITATIVE", "AMBIGUOUS", "HIDDEN_RISK", "ONE_SIDED", "PRIVACY_VIOLATION", "FINANCIAL_TRAP", "RIGHTS_WAIVER", "SAFE"],
+    "verdict": "[As NEUTRAL JUDGE: 3-4 sentence balanced assessment]",
+    "plain_english": "[Simple language a teenager understands]",
+    "suggested_fix": "[Fairer rewritten clause, or N/A if safe]",
+    "real_world_impact": "[One concrete example of how this hurts the user]",
+    "defense_validity": <1-10>,
+    "prosecution_validity": <1-10>
+  }},
+  "simple_explanation": "[What it says (1-2 sentences). What it means for you (impact). Think of it like (analogy)]",
+  "scenarios": [
+    {{"scenario_title": "<title>", "description": "<what happens>", "likelihood": "HIGH/MEDIUM/LOW", "financial_impact": "<cost>", "outcome": "<what user can do>"}}
+  ],
+  "negotiation_advice": {{
+    "negotiation_strategy": "<approach>",
+    "talking_points": ["<point1>", "<point2>", "<point3>"],
+    "acceptable_compromise": "<middle ground>",
+    "walk_away_threshold": "<when to refuse>",
+    "alternative_clause": "<fair rewrite>"
+  }}
+}}
+
+If risk_score < 5, set scenarios to [] and negotiation_advice to {{}}.
+Return ONLY valid JSON.
+"""
+
+
 async def analyze_clause(clause: dict, doc_type: str) -> dict:
-    """Run the full adversarial pipeline for a single clause."""
+    """Run ALL 6 agents in a SINGLE API call per clause."""
     
-    # Step 0: RAG — retrieve relevant legal knowledge & benchmarks
-    rag_context = ""
+    # RAG: local knowledge lookup (no API call needed)
+    rag_section = ""
     benchmark_comparison = None
     matched_patterns = []
-    
     if HAS_RAG:
         try:
             knowledge = retrieve_relevant_knowledge(
-                clause.get("text", ""),
-                clause.get("category", "OTHER"),
+                clause.get("text", ""), clause.get("category", "OTHER"),
             )
-            rag_context = knowledge.get("rag_context", "")
             benchmark_comparison = knowledge.get("benchmark")
             matched_patterns = knowledge.get("matched_patterns", [])
+            if benchmark_comparison:
+                rag_section = f"\nBENCHMARK (fair version): \"{benchmark_comparison.get('fair_example', '')}\""
+                rag_section += f"\nRED FLAGS: {', '.join(benchmark_comparison.get('red_flags', []))}"
         except Exception:
             pass
     
-    # Step 1: Corporate Lawyer defends
-    defense = await run_corporate_lawyer(clause, doc_type, rag_context)
-    await asyncio.sleep(2)  # Small delay to avoid rate limit
+    prompt = COMBINED_ANALYSIS_PROMPT.format(
+        title=clause.get("title", "Unknown"),
+        category=clause.get("category", "OTHER"),
+        doc_type=doc_type,
+        clause_text=clause.get("text", ""),
+        rag_section=rag_section,
+    )
     
-    # Step 2: Consumer Advocate attacks
-    prosecution = await run_consumer_advocate(clause, doc_type, rag_context)
-    await asyncio.sleep(2)
+    result = await call_llm_json(prompt)
     
-    # Step 3: Judge weighs both sides
-    verdict = await run_judge(clause, defense, prosecution)
-    await asyncio.sleep(2)
-    
-    # Step 4: Get risk score for downstream agents
-    risk_score = verdict.get("risk_score", 5) if isinstance(verdict, dict) else 5
-    key_issues = verdict.get("verdict", "") if isinstance(verdict, dict) else ""
-    
-    # Step 5: Simplifier
-    simple_explanation = await run_simplifier(clause, risk_score)
-    await asyncio.sleep(2)
-    
-    # Step 6: Scenarios + Negotiation (only for risky clauses)
-    scenarios = await run_scenario_simulation(clause, risk_score)
-    await asyncio.sleep(2)
-    negotiation = await run_negotiation_advisor(clause, risk_score, key_issues)
+    verdict = result.get("verdict", {})
+    if isinstance(verdict, str):
+        verdict = {"risk_score": 5, "verdict": verdict, "risk_types": [],
+                   "plain_english": verdict, "suggested_fix": "N/A",
+                   "real_world_impact": "", "defense_validity": 5, "prosecution_validity": 5}
     
     return {
         "clause": clause,
-        "defense": defense,
-        "prosecution": prosecution,
+        "defense": result.get("defense", ""),
+        "prosecution": result.get("prosecution", ""),
         "verdict": verdict,
-        "simple_explanation": simple_explanation,
-        "scenarios": scenarios,
-        "negotiation_advice": negotiation,
+        "simple_explanation": result.get("simple_explanation", ""),
+        "scenarios": result.get("scenarios", []),
+        "negotiation_advice": result.get("negotiation_advice", {}),
         "benchmark_comparison": benchmark_comparison,
         "matched_patterns": matched_patterns,
     }
 
 
-# ============================================================
-# STAGE 4: Full document analysis
-# ============================================================
 async def analyze_document(document_text: str, doc_type: str = "General Contract") -> dict:
-    """Run complete LexGuard analysis on a document."""
+    """Run complete LexGuard analysis."""
     
-    configure_gemini()
+    print(f"[LexGuard] Using LLM provider: {LLM_PROVIDER}")
     
-    # Stage 1: Segment into clauses
-    clauses = await segment_clauses(document_text)
+    # Call 1: Segment clauses
+    print("[LexGuard] Segmenting clauses...")
+    seg_prompt = CLAUSE_SEGMENTATION_PROMPT.format(document_text=document_text[:15000])
+    clauses = await call_llm_json(seg_prompt)
+    if isinstance(clauses, dict):
+        clauses = clauses.get("clauses", [clauses])
+    print(f"[LexGuard] Found {len(clauses)} clauses")
     
-    # Stage 2: Analyze all clauses (with controlled concurrency)
-    # Process up to 3 clauses in parallel to avoid rate limits
+    # Calls 2..N: Analyze each clause (1 call each)
     results = []
-    # Process ONE clause at a time to respect free-tier rate limits
-    for clause in clauses:
-        result = await analyze_clause(clause, doc_type)
-        results.append(result)
-        await asyncio.sleep(3)  # Breathing room between clauses
+    for i, clause in enumerate(clauses):
+        print(f"[LexGuard] Analyzing clause {i+1}/{len(clauses)}: {clause.get('title', '?')}")
+        try:
+            r = await analyze_clause(clause, doc_type)
+            results.append(r)
+        except Exception as e:
+            print(f"[LexGuard] Clause {i+1} failed: {e}")
+            results.append({
+                "clause": clause, "defense": "", "prosecution": "",
+                "verdict": {"risk_score": 5, "risk_types": [], "verdict": "Analysis failed",
+                            "plain_english": "Could not analyze this clause", "suggested_fix": "N/A",
+                            "real_world_impact": "", "defense_validity": 0, "prosecution_validity": 0},
+                "simple_explanation": "", "scenarios": [], "negotiation_advice": {},
+                "benchmark_comparison": None, "matched_patterns": [],
+            })
     
-    # Stage 3: Compute overall scores
+    # Compute scores
     risk_scores = []
-    critical_issues = []
-    warnings = []
-    safe_clauses = []
-    
+    critical_issues, warnings, safe_clauses = [], [], []
     for r in results:
-        verdict = r.get("verdict", {})
-        score = verdict.get("risk_score", 5) if isinstance(verdict, dict) else 5
+        v = r.get("verdict", {})
+        score = v.get("risk_score", 5) if isinstance(v, dict) else 5
         risk_scores.append(score)
-        
-        if score >= 8:
-            critical_issues.append(r)
-        elif score >= 5:
-            warnings.append(r)
-        else:
-            safe_clauses.append(r)
+        if score >= 8: critical_issues.append(r)
+        elif score >= 5: warnings.append(r)
+        else: safe_clauses.append(r)
     
     avg_score = sum(risk_scores) / len(risk_scores) if risk_scores else 0
     max_score = max(risk_scores) if risk_scores else 0
     
-    # Overall risk grade
-    if avg_score >= 8:
-        grade = "F"
-        recommendation = "DO NOT SIGN"
-    elif avg_score >= 6.5:
-        grade = "D"
-        recommendation = "DO NOT SIGN WITHOUT MAJOR CHANGES"
-    elif avg_score >= 5:
-        grade = "C"
-        recommendation = "NEGOTIATE BEFORE SIGNING"
-    elif avg_score >= 3.5:
-        grade = "B"
-        recommendation = "GENERALLY SAFE — REVIEW WARNINGS"
-    else:
-        grade = "A"
-        recommendation = "SAFE TO SIGN"
+    if avg_score >= 8: grade, recommendation = "F", "DO NOT SIGN"
+    elif avg_score >= 6.5: grade, recommendation = "D", "DO NOT SIGN WITHOUT MAJOR CHANGES"
+    elif avg_score >= 5: grade, recommendation = "C", "NEGOTIATE BEFORE SIGNING"
+    elif avg_score >= 3.5: grade, recommendation = "B", "GENERALLY SAFE — REVIEW WARNINGS"
+    else: grade, recommendation = "A", "SAFE TO SIGN"
     
-    # Stage 4: Contradiction Detection (whole-document analysis)
-    contradictions = {}
+    # Call N+1: Contradiction detection
+    print("[LexGuard] Detecting contradictions...")
+    contradictions = {"contradictions": [], "ambiguities": [], "missing_protections": [], "unusual_terms": []}
     try:
-        all_clauses_text = "\n\n".join([
-            f"CLAUSE {c.get('clause_number', i+1)}: {c.get('title', 'Unknown')}\n{c.get('text', '')}"
-            for i, c in enumerate(clauses)
-        ])
-        contradiction_prompt = CONTRADICTION_DETECTION_PROMPT.format(
-            all_clauses_text=all_clauses_text[:8000]
-        )
-        contradictions = await call_gemini_json(contradiction_prompt, GEMINI_FLASH_MODEL)
+        all_text = "\n".join([f"CLAUSE {c.get('clause_number', i+1)}: {c.get('title', '?')} - {c.get('text', '')[:300]}" for i, c in enumerate(clauses)])
+        contradictions = await call_llm_json(CONTRADICTION_DETECTION_PROMPT.format(all_clauses_text=all_text[:6000]))
     except Exception:
-        contradictions = {"contradictions": [], "ambiguities": [], "missing_protections": [], "unusual_terms": []}
+        pass
     
-    # Stage 5: Generate executive summary
+    # Call N+2: Executive summary
+    print("[LexGuard] Generating summary...")
     top_risks = "\n".join([
-        f"- {r['clause']['title']} (Score: {r['verdict'].get('risk_score', '?')}/10): "
-        f"{r['verdict'].get('plain_english', 'N/A')[:200]}"
+        f"- {r['clause']['title']} ({r['verdict'].get('risk_score', '?')}/10): {r['verdict'].get('plain_english', '')[:200]}"
         for r in sorted(results, key=lambda x: x.get('verdict', {}).get('risk_score', 0) if isinstance(x.get('verdict'), dict) else 0, reverse=True)[:5]
     ])
+    summary = await call_llm_text(OVERALL_SUMMARY_PROMPT.format(
+        doc_type=doc_type, total_clauses=len(clauses),
+        critical_count=len(critical_issues), warning_count=len(warnings),
+        safe_count=len(safe_clauses), avg_score=f"{avg_score:.1f}", top_risks=top_risks,
+    ))
     
-    summary_prompt = OVERALL_SUMMARY_PROMPT.format(
-        doc_type=doc_type,
-        total_clauses=len(clauses),
-        critical_count=len(critical_issues),
-        warning_count=len(warnings),
-        safe_count=len(safe_clauses),
-        avg_score=f"{avg_score:.1f}",
-        top_risks=top_risks,
-    )
-    executive_summary = await call_gemini(summary_prompt, GEMINI_FLASH_MODEL)
+    print(f"[LexGuard] Done! Grade: {grade}, Score: {avg_score:.1f}/10")
     
     return {
         "document_type": doc_type,
@@ -347,7 +321,7 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
         "max_risk_score": max_score,
         "risk_grade": grade,
         "recommendation": recommendation,
-        "executive_summary": executive_summary,
+        "executive_summary": summary,
         "critical_issues": len(critical_issues),
         "warnings_count": len(warnings),
         "safe_count": len(safe_clauses),

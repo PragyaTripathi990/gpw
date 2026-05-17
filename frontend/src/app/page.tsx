@@ -156,6 +156,11 @@ function ClauseCard({ result, index }: { result: ClauseResult; index: number }) 
       <div
         className="flex items-center justify-between cursor-pointer"
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`Clause ${result.clause.clause_number}: ${result.clause.title}, Risk score ${score} out of 10. ${expanded ? 'Click to collapse' : 'Click to expand details'}`}
       >
         <div className="flex items-center gap-3">
           <span
@@ -491,9 +496,9 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               className="text-center mb-10"
             >
-              <h2 className="text-4xl font-bold mb-3 gradient-text">
+              <h1 className="text-4xl font-bold mb-3 gradient-text">
                 Protect Your Rights
-              </h2>
+              </h1>
               <p className="text-gray-400 text-lg">
                 Upload any contract, agreement, or policy — our adversarial AI agents will
                 find every hidden risk before you sign.
@@ -624,7 +629,9 @@ export default function Home() {
             <button
               onClick={handleAnalyze}
               disabled={loading}
-              className="w-full mt-6 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold text-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+              aria-busy={loading}
+              aria-label={loading ? "Analyzing contract, please wait" : "Analyze contract for risks"}
+              className="w-full mt-6 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold text-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 focus:ring-offset-black"
             >
               {loading ? (
                 <>
@@ -958,13 +965,13 @@ export default function Home() {
         ))}
 
         {/* Footer */}
-        <div className="text-center py-12 text-gray-600 text-sm">
+        <footer className="text-center py-12 text-gray-600 text-sm" role="contentinfo">
           <p>
             LexGuard — Built with Google Gemini, Document AI, Cloud Vision, Cloud
             Translation, Cloud NL API, Firestore, Cloud Run & Firebase
           </p>
           <p className="mt-1">Adversarial Multi-Agent Contract Intelligence</p>
-        </div>
+        </footer>
       </main>
     </div>
   );

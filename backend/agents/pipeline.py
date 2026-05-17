@@ -34,6 +34,7 @@ else:
 
 
 def _env_flag(name: str, default: bool) -> bool:
+    """Read a boolean flag from environment variables."""
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -150,13 +151,16 @@ def _select_llm_clause_indices(heuristic_results: list[dict], max_llm_clauses: i
     return sorted(selected)
 
 def _get_groq():
+    """Lazy-initialize and return the Groq client singleton."""
     global _groq_client
     if _groq_client is None:
         from groq import Groq
         _groq_client = Groq(api_key=GROQ_API_KEY)
     return _groq_client
 
+
 def _get_openai():
+    """Lazy-initialize and return the OpenAI client singleton."""
     global _openai_client
     if _openai_client is None:
         from openai import OpenAI
@@ -402,7 +406,8 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
 
     results = list(heuristic_results)
 
-    async def _analyze_selected_clause(idx: int):
+    async def _analyze_selected_clause(idx: int) -> tuple[int, dict]:
+        """Run deep LLM analysis for a single clause by index."""
         clause = clauses[idx]
         print(f"[LexGuard] Deep analysis for clause {idx+1}/{len(clauses)}: {clause.get('title', '?')}")
         try:
@@ -414,7 +419,8 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
     if selected_llm_indices:
         semaphore = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 
-        async def _bounded(idx: int):
+        async def _bounded(idx: int) -> tuple[int, dict]:
+            """Semaphore-bounded wrapper for concurrent clause analysis."""
             async with semaphore:
                 return await _analyze_selected_clause(idx)
 

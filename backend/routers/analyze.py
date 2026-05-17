@@ -179,5 +179,6 @@ async def generate_report(request: Request):
 
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> dict:
+    """Return service health status for monitoring and load balancer probes."""
     return {"status": "healthy", "service": "LexGuard API"}

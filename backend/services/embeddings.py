@@ -7,7 +7,8 @@ import google.generativeai as genai
 from backend.config import GEMINI_API_KEY
 
 
-def configure():
+def configure() -> None:
+    """Configure the Google Generative AI SDK with the API key."""
     genai.configure(api_key=GEMINI_API_KEY)
 
 

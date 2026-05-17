@@ -232,6 +232,7 @@ HEURISTIC_RULES: list[dict[str, Any]] = [
 
 
 def _unique_preserve_order(values: list[str]) -> list[str]:
+    """Deduplicate a list while preserving original insertion order."""
     seen: set[str] = set()
     ordered: list[str] = []
     for value in values:
@@ -242,11 +243,13 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
 
 
 def _normalize_title(raw_title: str) -> str:
+    """Clean and title-case a raw section heading."""
     cleaned = re.sub(r"\s+", " ", raw_title).strip(" :-\t")
     return cleaned.title() if cleaned.isupper() else cleaned
 
 
 def infer_clause_category(title: str, text: str) -> str:
+    """Map a clause to a legal category using keyword matching."""
     haystack = f"{title} {text}".lower()
     for category, keywords in CATEGORY_KEYWORDS:
         if any(keyword in haystack for keyword in keywords):
@@ -316,6 +319,7 @@ def segment_document_fallback(document_text: str) -> list[dict[str, Any]]:
 
 
 def _match_rules(text: str) -> list[dict[str, Any]]:
+    """Return all heuristic rules whose regex patterns match the clause text."""
     matched: list[dict[str, Any]] = []
     for rule in HEURISTIC_RULES:
         if any(re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL) for pattern in rule["patterns"]):
@@ -324,6 +328,7 @@ def _match_rules(text: str) -> list[dict[str, Any]]:
 
 
 def _pattern_risk_weight(risk: str) -> int:
+    """Convert a risk severity label to a numeric weight for scoring."""
     return {
         "CRITICAL": 3,
         "HIGH": 2,
@@ -333,6 +338,7 @@ def _pattern_risk_weight(risk: str) -> int:
 
 
 def _score_to_severity(score: float) -> str:
+    """Map a numeric risk score to a severity label."""
     if score >= 8:
         return "CRITICAL"
     if score >= 6:
@@ -343,6 +349,7 @@ def _score_to_severity(score: float) -> str:
 
 
 def _default_label(category: str, risk_types: list[str]) -> str:
+    """Generate a human-readable label when no heuristic rule matches."""
     for risk_type in risk_types:
         if risk_type in RISK_THEME_LABELS:
             return RISK_THEME_LABELS[risk_type]
@@ -361,6 +368,7 @@ def _default_label(category: str, risk_types: list[str]) -> str:
 
 
 def _default_plain_english(category: str, text: str, score: float) -> str:
+    """Provide a plain-English explanation for a clause based on its category."""
     if score < 5:
         return "This clause looks closer to standard contract language and does not stand out as one of the most dangerous parts of the document."
     if category == "TERMINATION":
@@ -378,6 +386,7 @@ def _default_plain_english(category: str, text: str, score: float) -> str:
 
 
 def _default_impact(category: str) -> str:
+    """Return a default real-world impact statement for the given category."""
     return {
         "TERMINATION": "You could lose the engagement quickly while still carrying obligations that continue after the company walks away.",
         "DATA_PRIVACY": "Sensitive personal information could be collected or reused in ways that are hard to reverse later.",
@@ -389,6 +398,7 @@ def _default_impact(category: str) -> str:
 
 
 def _build_defense(category: str, score: float) -> str:
+    """Generate a corporate-lawyer-style defense of the clause."""
     if score < 5:
         return "This clause appears closer to ordinary protective language and may be defensible as standard risk management."
     if category in {"DATA_PRIVACY", "IP_RIGHTS"}:
@@ -399,6 +409,7 @@ def _build_defense(category: str, score: float) -> str:
 
 
 def _build_prosecution(primary_label: str, rules: list[dict[str, Any]], matched_patterns: list[dict[str, Any]]) -> str:
+    """Generate a consumer-advocate-style attack on the clause."""
     parts = [f"The main problem is {primary_label.lower()}."]
     if rules:
         parts.extend(rule["plain_english"] for rule in rules[:2])
@@ -408,6 +419,7 @@ def _build_prosecution(primary_label: str, rules: list[dict[str, Any]], matched_
 
 
 def _build_scenarios(primary_label: str, impact: str, score: float) -> list[dict[str, str]]:
+    """Build worst-case scenario simulations for high-risk clauses."""
     if score < 7:
         return []
     return [
@@ -422,6 +434,7 @@ def _build_scenarios(primary_label: str, impact: str, score: float) -> list[dict
 
 
 def _build_negotiation(primary_label: str, suggested_fix: str, score: float) -> dict[str, Any]:
+    """Generate negotiation strategy and talking points for risky clauses."""
     if score < 6:
         return {}
     return {

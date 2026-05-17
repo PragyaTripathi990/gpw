@@ -37,6 +37,7 @@ CATEGORY_LABELS = {
 
 
 def _score_to_severity(score: float) -> str:
+    """Map a numeric risk score to a severity label."""
     if score >= 8:
         return "CRITICAL"
     if score >= 6:
@@ -47,6 +48,7 @@ def _score_to_severity(score: float) -> str:
 
 
 def _build_flag_label(clause_result: dict[str, Any]) -> str:
+    """Derive the most descriptive label for a clause red flag."""
     matched_patterns = clause_result.get("matched_patterns", [])
     if matched_patterns:
         return matched_patterns[0].get("pattern", "Known exploitative pattern").title()
@@ -63,6 +65,7 @@ def _build_flag_label(clause_result: dict[str, Any]) -> str:
 
 
 def build_top_red_flags(analysis: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
+    """Extract and rank the most critical red flags across all clauses."""
     items: list[dict[str, Any]] = []
     for clause_result in analysis.get("clause_results", []):
         clause = clause_result.get("clause", {})
@@ -116,6 +119,7 @@ def build_top_red_flags(analysis: dict[str, Any], limit: int = 5) -> list[dict[s
 
 
 def build_risk_summary(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Build a high-level risk summary with headline, themes, and call-to-action."""
     top_red_flags = analysis.get("top_red_flags", [])
     overall_score = analysis.get("overall_risk_score", 0)
     recommendation = analysis.get("recommendation", "Review carefully")
@@ -158,6 +162,7 @@ def build_risk_summary(analysis: dict[str, Any]) -> dict[str, Any]:
 
 
 def enrich_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Add top red flags and risk summary to the analysis output."""
     enriched = deepcopy(analysis)
     enriched["top_red_flags"] = build_top_red_flags(enriched)
     enriched["risk_summary"] = build_risk_summary(enriched)

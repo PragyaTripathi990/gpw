@@ -1,0 +1,20 @@
+[project]
+name = "lexguard"
+version = "1.0.0"
+description = "AI-Powered Adversarial Contract Intelligence Platform"
+requires-python = ">=3.9"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.isort]
+known-first-party = ["backend"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

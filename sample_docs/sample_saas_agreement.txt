@@ -1,0 +1,39 @@
+SOFTWARE AS A SERVICE AGREEMENT
+
+This Software as a Service Agreement ("Agreement") is entered into as of the date of acceptance ("Effective Date") between TechCorp Solutions Inc. ("Provider") and the individual or entity accepting this Agreement ("Customer").
+
+1. GRANT OF LICENSE
+Provider grants Customer a non-exclusive, non-transferable, revocable license to access and use the Service during the Subscription Term. Provider reserves the right to modify, suspend, or discontinue any aspect of the Service at any time without prior notice and without liability to Customer.
+
+2. FEES AND PAYMENT
+Customer shall pay all fees specified in the applicable Order Form. All fees are non-refundable regardless of actual usage or early termination. Provider reserves the right to increase fees at any time with 15 days written notice. If Customer does not object within 15 days, the new fees are deemed accepted. Late payments shall accrue interest at the rate of 1.5% per month or the maximum rate permitted by law, whichever is greater.
+
+3. AUTO-RENEWAL
+This Agreement automatically renews for successive one-year terms unless either party provides written notice of non-renewal at least 90 days before the end of the then-current term. Customer acknowledges that failure to provide timely notice of non-renewal constitutes agreement to continue the Service at the then-current rates.
+
+4. DATA OWNERSHIP AND USAGE
+Customer retains ownership of Customer Data uploaded to the Service. However, Customer grants Provider a worldwide, perpetual, irrevocable, royalty-free license to use, reproduce, modify, distribute, and create derivative works from Customer Data for the purpose of providing, improving, and promoting the Service and Provider's other products. Provider may use anonymized and aggregated Customer Data for any business purpose without restriction.
+
+5. LIMITATION OF LIABILITY
+IN NO EVENT SHALL PROVIDER BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING WITHOUT LIMITATION, LOSS OF PROFITS, DATA, BUSINESS OPPORTUNITIES, OR GOODWILL, REGARDLESS OF THE CAUSE OF ACTION OR THE THEORY OF LIABILITY. PROVIDER'S TOTAL AGGREGATE LIABILITY SHALL NOT EXCEED THE FEES PAID BY CUSTOMER IN THE THREE (3) MONTHS PRECEDING THE CLAIM.
+
+6. INDEMNIFICATION
+Customer shall indemnify, defend, and hold harmless Provider, its officers, directors, employees, and agents from and against any and all claims, damages, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or relating to Customer's use of the Service, Customer's violation of this Agreement, or Customer's violation of any rights of a third party. Provider has no obligation to indemnify Customer under any circumstances.
+
+7. TERMINATION
+Provider may terminate this Agreement immediately and without notice for any reason or no reason. Upon termination, Customer's access to the Service and Customer Data will be immediately revoked. Provider shall have no obligation to retain, return, or provide access to Customer Data after termination. Customer must pay all fees due through the end of the then-current term regardless of the reason for termination.
+
+8. DISPUTE RESOLUTION
+Any dispute arising under this Agreement shall be resolved exclusively through binding arbitration administered by a provider of Provider's choosing, conducted in Provider's home jurisdiction. Customer waives any right to participate in a class action lawsuit or class-wide arbitration. The arbitration shall be confidential. Customer agrees to pay all arbitration fees and costs. The arbitrator's decision shall be final and binding with no right of appeal.
+
+9. MODIFICATION OF TERMS
+Provider reserves the right to modify this Agreement at any time by posting updated terms on its website. Continued use of the Service after such modifications constitutes acceptance of the modified terms. It is Customer's responsibility to review the Agreement periodically for changes.
+
+10. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Delaware, without regard to conflict of law principles. Customer consents to the exclusive jurisdiction of the courts located in Wilmington, Delaware for any legal proceedings not subject to arbitration.
+
+11. CONFIDENTIALITY
+Customer agrees not to disclose the terms of this Agreement, including pricing, to any third party without Provider's prior written consent. Customer further agrees not to publicly review, benchmark, or discuss the performance of the Service without Provider's prior written consent.
+
+12. INTELLECTUAL PROPERTY
+Any feedback, suggestions, or ideas submitted by Customer regarding the Service shall become the exclusive property of Provider. Provider may use such feedback for any purpose without compensation to Customer. Customer waives all moral rights in any feedback provided.

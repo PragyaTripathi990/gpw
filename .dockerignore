@@ -1,0 +1,12 @@
+frontend/
+.git/
+__pycache__/
+*.pyc
+.env
+backend/.env
+node_modules/
+.next/
+*.log
+.DS_Store
+sample_docs/
+backend/tests/

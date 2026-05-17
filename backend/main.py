@@ -17,6 +17,7 @@ Google Cloud Services Used:
 - Google Cloud Run (Containerized Deployment)
 - Firebase Hosting (Frontend)
 """
+import os
 import time
 from collections import defaultdict
 from fastapi import FastAPI, Request, Response
@@ -49,9 +50,16 @@ ALLOWED_ORIGINS = [
     "https://lexguard.firebaseapp.com",
 ]
 
+EXTRA_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS + EXTRA_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.run\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],

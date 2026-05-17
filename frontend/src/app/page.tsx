@@ -60,6 +60,25 @@ interface BenchmarkComparison {
   red_flags: string[];
 }
 
+interface RedFlag {
+  label: string;
+  severity: string;
+  risk_score: number;
+  clause_number: number;
+  clause_title: string;
+  category: string;
+  why_it_matters: string;
+  evidence: string;
+  fix_preview: string;
+}
+
+interface RiskSummary {
+  headline: string;
+  strongest_signal: string;
+  call_to_action: string;
+  dominant_themes: string[];
+}
+
 interface ClauseResult {
   clause: {
     clause_number: number;
@@ -97,6 +116,8 @@ interface AnalysisResult {
   safe_count: number;
   clause_results: ClauseResult[];
   contradictions?: Contradictions;
+  top_red_flags?: RedFlag[];
+  risk_summary?: RiskSummary;
   parsing_method: string;
   language_info: {
     original_language: string;
@@ -135,6 +156,13 @@ function getGradeColor(grade: string): string {
   if (grade === "F" || grade === "D") return "text-red-500";
   if (grade === "C") return "text-yellow-500";
   return "text-green-500";
+}
+
+function getSeverityPill(severity: string): string {
+  if (severity === "CRITICAL") return "bg-red-600 text-white";
+  if (severity === "HIGH") return "bg-orange-500 text-white";
+  if (severity === "MEDIUM") return "bg-yellow-500 text-black";
+  return "bg-green-600 text-white";
 }
 
 // ============================================================
@@ -482,7 +510,7 @@ export default function Home() {
             </div>
             <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
               <Sparkles className="w-4 h-4" />
-              Powered by Google Gemini & GCP
+              Powered by multi-agent AI & cloud document parsing
             </div>
           </div>
         </header>
@@ -500,19 +528,20 @@ export default function Home() {
                 Protect Your Rights
               </h1>
               <p className="text-gray-400 text-lg">
-                Upload any contract, agreement, or policy — our adversarial AI agents will
-                find every hidden risk before you sign.
+                Upload any contract, agreement, or policy — a hybrid review engine combines
+                adversarial AI, rule-based checks, and legal benchmarks to surface hidden risk
+                before you sign.
               </p>
             </motion.div>
 
             {/* Google Services Badges */}
             <div className="flex flex-wrap justify-center gap-2 mb-8">
               {[
-                { icon: Brain, label: "Gemini 2.5 Pro" },
-                { icon: FileText, label: "Document AI" },
-                { icon: Eye, label: "Cloud Vision" },
-                { icon: Languages, label: "Translation" },
-                { icon: Scale, label: "Multi-Agent" },
+                { icon: Brain, label: "Multi-Agent Review" },
+                { icon: Scale, label: "Rule-Based Fallback" },
+                { icon: FileText, label: "Document Parsing" },
+                { icon: Eye, label: "OCR" },
+                { icon: Languages, label: "Benchmark Match" },
               ].map((svc, i) => (
                 <span
                   key={i}
@@ -654,9 +683,9 @@ export default function Home() {
                 className="mt-6 space-y-3"
               >
                 {[
-                  "Parsing document with Google Document AI...",
-                  "Detecting language with Cloud Translation...",
-                  "RAG: Retrieving legal benchmarks (Vertex AI Embeddings)...",
+                  "Parsing document...",
+                  "Checking language and OCR needs...",
+                  "Retrieving legal benchmarks...",
                   "Agent 1: Corporate Lawyer analyzing...",
                   "Agent 2: Consumer Advocate attacking...",
                   "Agent 3: Judge deliberating...",
@@ -664,6 +693,7 @@ export default function Home() {
                   "Agent 5: Simulating real-world scenarios...",
                   "Agent 6: Generating negotiation strategies...",
                   "Detecting contradictions & ambiguities...",
+                  "Ranking top red flags...",
                   "Computing risk scores...",
                 ].map((step, i) => (
                   <motion.div
@@ -847,6 +877,100 @@ export default function Home() {
           </motion.div>
         </div>
 
+        {/* Risk Summary */}
+        {result.risk_summary && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card rounded-2xl p-6 mb-8 border border-red-500/20 bg-gradient-to-br from-red-500/10 via-transparent to-orange-500/10"
+          >
+            <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-xs uppercase tracking-[0.25em] text-red-300/80 mb-3">
+                  Risk Snapshot
+                </p>
+                <h2 className="text-2xl md:text-3xl font-bold text-white leading-tight">
+                  {result.risk_summary.headline}
+                </h2>
+                <p className="text-gray-300 mt-3 leading-relaxed">
+                  Strongest signal: <span className="text-white font-medium">{result.risk_summary.strongest_signal}</span>.
+                  {" "}Recommended action: <span className="text-red-300 font-medium">{result.risk_summary.call_to_action}</span>.
+                </p>
+              </div>
+              <div className="min-w-[220px] rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">
+                  Dominant Themes
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(result.risk_summary.dominant_themes || []).map((theme, index) => (
+                    <span
+                      key={`${theme}-${index}`}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-200"
+                    >
+                      {theme}
+                    </span>
+                  ))}
+                  {(!result.risk_summary.dominant_themes || result.risk_summary.dominant_themes.length === 0) && (
+                    <span className="text-sm text-gray-400">No dominant theme detected.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Top Red Flags */}
+        {result.top_red_flags && result.top_red_flags.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <h2 className="text-lg font-semibold text-white">Top Red Flags</h2>
+              <span className="text-sm text-gray-500">
+                (highest-signal issues for fast review)
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {result.top_red_flags.slice(0, 5).map((flag, index) => (
+                <motion.div
+                  key={`${flag.clause_number}-${flag.label}-${index}`}
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.06 }}
+                  className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{flag.label}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Clause {flag.clause_number}: {flag.clause_title}
+                      </p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${getSeverityPill(flag.severity)}`}>
+                      {flag.severity}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-200 leading-relaxed mb-3">
+                    {flag.why_it_matters}
+                  </p>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">
+                      Evidence
+                    </p>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      {flag.evidence}
+                    </p>
+                  </div>
+                  {flag.fix_preview && flag.fix_preview !== "N/A" && (
+                    <p className="text-xs text-green-300 mt-3 leading-relaxed">
+                      Fairer version: {flag.fix_preview}
+                    </p>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Risk Bar Visual */}
         <div className="glass-card rounded-2xl p-6 mb-8">
           <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">
@@ -967,8 +1091,8 @@ export default function Home() {
         {/* Footer */}
         <footer className="text-center py-12 text-gray-600 text-sm" role="contentinfo">
           <p>
-            LexGuard — Built with Google Gemini, Document AI, Cloud Vision, Cloud
-            Translation, Cloud NL API, Firestore, Cloud Run & Firebase
+            LexGuard — Built with multi-agent AI, document parsing, OCR,
+            translation, benchmark matching, and PDF reporting
           </p>
           <p className="mt-1">Adversarial Multi-Agent Contract Intelligence</p>
         </footer>

@@ -15,7 +15,16 @@ Used for:
 
 Uses: Google Vertex AI Embeddings + in-memory vector store
 """
+import os
+
 from backend.services.embeddings import get_embedding, get_embeddings_batch, cosine_similarity
+
+
+ENABLE_SEMANTIC_RAG = os.getenv("LEXGUARD_ENABLE_SEMANTIC_RAG", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 # ============================================================
@@ -199,6 +208,10 @@ def _get_benchmark_embeddings() -> list[dict]:
     
     if _benchmark_embeddings_cache is not None:
         return _benchmark_embeddings_cache
+
+    if not ENABLE_SEMANTIC_RAG:
+        _benchmark_embeddings_cache = []
+        return _benchmark_embeddings_cache
     
     items = []
     texts = []
@@ -265,28 +278,29 @@ def retrieve_relevant_knowledge(clause_text: str, category: str, top_k: int = 3)
             result["matched_patterns"].append(pattern)
     
     # Semantic similarity RAG (using embeddings)
-    try:
-        benchmarks = _get_benchmark_embeddings()
-        if benchmarks:
-            query_emb = get_embedding(clause_text[:500])
-            
-            similarities = []
-            for item in benchmarks:
-                if "embedding" in item:
-                    sim = cosine_similarity(query_emb, item["embedding"])
-                    similarities.append({"similarity": sim, **item})
-            
-            similarities.sort(key=lambda x: x["similarity"], reverse=True)
-            top_matches = similarities[:top_k]
-            
-            # Build RAG context for the agents
-            rag_parts = []
-            for match in top_matches:
-                if match["similarity"] > 0.5:
-                    rag_parts.append(f"[Relevance: {match['similarity']:.2f}] {match['text']}")
-            
-            result["rag_context"] = "\n".join(rag_parts)
-    except Exception as e:
-        print(f"RAG retrieval failed: {e}")
+    if ENABLE_SEMANTIC_RAG:
+        try:
+            benchmarks = _get_benchmark_embeddings()
+            if benchmarks:
+                query_emb = get_embedding(clause_text[:500])
+                
+                similarities = []
+                for item in benchmarks:
+                    if "embedding" in item:
+                        sim = cosine_similarity(query_emb, item["embedding"])
+                        similarities.append({"similarity": sim, **item})
+                
+                similarities.sort(key=lambda x: x["similarity"], reverse=True)
+                top_matches = similarities[:top_k]
+                
+                # Build RAG context for the agents
+                rag_parts = []
+                for match in top_matches:
+                    if match["similarity"] > 0.5:
+                        rag_parts.append(f"[Relevance: {match['similarity']:.2f}] {match['text']}")
+                
+                result["rag_context"] = "\n".join(rag_parts)
+        except Exception as e:
+            print(f"RAG retrieval failed: {e}")
     
     return result

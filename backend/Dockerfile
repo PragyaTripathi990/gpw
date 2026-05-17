@@ -9,11 +9,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
-# Copy application code
-COPY . .
+# Copy application code as a proper Python package
+COPY . /app/backend
 
 # Expose port
 EXPOSE 8080
@@ -22,4 +22,4 @@ EXPOSE 8080
 ENV PORT=8080
 
 # Run the application
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

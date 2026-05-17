@@ -49,3 +49,15 @@ def test_pdf_handles_empty_clauses():
     pdf = generate_pdf_report(analysis)
     assert isinstance(pdf, bytes)
     assert len(pdf) > 0
+
+
+def test_pdf_handles_special_characters():
+    """PDF should escape characters that could break ReportLab markup."""
+    analysis = _make_mock_analysis()
+    analysis["executive_summary"] = "Uses <angle brackets> & ampersands safely."
+    analysis["clause_results"][0]["clause"]["title"] = "Termination <Immediate>"
+    analysis["clause_results"][0]["verdict"]["plain_english"] = "They can cancel & cut access."
+    analysis["clause_results"][0]["verdict"]["suggested_fix"] = "Add <30-day> notice & export rights."
+    pdf = generate_pdf_report(analysis)
+    assert isinstance(pdf, bytes)
+    assert len(pdf) > 0

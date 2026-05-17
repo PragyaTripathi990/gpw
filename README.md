@@ -31,12 +31,12 @@ User uploads document
             ╚═══════════════════════════════════╝
                               ▼
                  ┌──────────────────────────┐
-                 │  Risk Scoring + Report   │
-                 │  Stored in Firestore     │
+                 │ Risk Scoring + Reporting │
+                 │ Optional Cloud Storage   │
                  └──────────────────────────┘
 ```
 
-## 🔧 Google Cloud Services Used (14)
+## 🔧 Cloud Capabilities Used
 
 | # | Service | Purpose |
 |---|---------|---------|
@@ -45,15 +45,10 @@ User uploads document
 | 3 | **Google Document AI** | Premium PDF/document parsing |
 | 4 | **Cloud Vision API** | OCR for images of contracts |
 | 5 | **Cloud Translation API** | Multi-language contract support |
-| 6 | **Cloud Natural Language** | Sentiment & entity analysis |
-| 7 | **Cloud Storage** | Store uploaded documents |
-| 8 | **Firestore** | Store analysis results |
-| 9 | **Cloud Run** | Backend deployment |
-| 10 | **Firebase Hosting** | Frontend deployment |
-| 11 | **Firebase Auth** | User authentication |
-| 12 | **BigQuery** | Analytics on analyzed contracts |
-| 13 | **Google Docs API** | Report export |
-| 14 | **Google Sheets API** | Data export |
+| 6 | **Cloud Storage** | Optional upload persistence |
+| 7 | **Firestore** | Optional result persistence |
+| 8 | **Cloud Run** | Backend deployment |
+| 9 | **Firebase Hosting** | Frontend deployment |
 
 ## 🚀 Quick Start
 
@@ -80,12 +75,16 @@ npm run dev
 
 - **Upload any format**: PDF, DOCX, Images (OCR), URLs, plain text
 - **Multi-language**: Automatically detects and translates non-English contracts
-- **Adversarial Debate**: 4 AI agents debate each clause from different perspectives
+- **Adversarial Debate**: 6 expert roles analyze each clause from opposing perspectives
+- **Adaptive Deep Review**: Heuristic triage sends only the highest-risk clauses through expensive LLM analysis for faster results
+- **Deterministic Fallback**: Rule-based clause scoring keeps the system useful even when external AI services are unavailable
 - **Risk Scoring**: Per-clause and overall risk scores (1-10)
+- **Top Red Flags**: High-signal issues are ranked for instant review by judges or users
 - **Plain English**: Every clause translated to simple language anyone can understand
 - **Suggested Fixes**: AI-generated fairer alternatives for risky clauses
+- **Benchmark Comparison**: Clauses are compared against known fair contract patterns
 - **Beautiful Dashboard**: Interactive visualization of all findings
 
 ## 👥 Team
 
-Built at [Hackathon Name] 2025
+Built for live hackathon judging and contract-risk demos.

@@ -11,15 +11,19 @@ Security:
     - Sanitized error messages (no internal details leaked)
     - Rate limiting handled in main.py middleware
 """
-import re
+import ipaddress
+import logging
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from typing import Optional
+from urllib.parse import urlparse
 
 from backend.services.document_parser import parse_document
+from backend.services.analysis_enrichment import enrich_analysis
 from backend.agents.pipeline import analyze_document
 
 router = APIRouter(prefix="/api", tags=["analysis"])
+logger = logging.getLogger(__name__)
 
 # Security constants
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -34,9 +38,43 @@ ALLOWED_DOC_TYPES = {
 
 
 def _validate_url(url: str) -> bool:
-    """Validate URL format to prevent SSRF attacks."""
-    pattern = re.compile(r'^https?://[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
-    return bool(pattern.match(url))
+    """Validate URL format and reject common SSRF targets."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+
+    # Reject credentialed URLs like http://user:pass@example.com.
+    if parsed.username or parsed.password:
+        return False
+
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        return False
+
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        return False
+
+    # Common DNS helpers that map directly to local/private IPs.
+    if hostname.endswith((".nip.io", ".sslip.io", ".localtest.me")):
+        return False
+
+    try:
+        ip_addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return True
+
+    return not (
+        ip_addr.is_private
+        or ip_addr.is_loopback
+        or ip_addr.is_link_local
+        or ip_addr.is_multicast
+        or ip_addr.is_reserved
+        or ip_addr.is_unspecified
+    )
 
 
 @router.post("/analyze")
@@ -98,6 +136,7 @@ async def analyze_contract(
         
         # --- Run Multi-Agent Analysis ---
         analysis = await analyze_document(document_text, doc_type)
+        analysis = enrich_analysis(analysis)
 
         # Add metadata
         analysis["parsing_method"] = parsed.get("method", "unknown")
@@ -111,12 +150,12 @@ async def analyze_contract(
     
     except HTTPException:
         raise
-    except Exception as e:
-        # Sanitize error message — don't leak internal details
-        error_msg = str(e)
-        if "api_key" in error_msg.lower() or "secret" in error_msg.lower():
-            error_msg = "Internal service error. Please try again."
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {error_msg}")
+    except Exception:
+        logger.exception("Contract analysis failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Analysis failed due to an internal service error.",
+        )
 
 
 @router.post("/report/pdf")
@@ -131,8 +170,12 @@ async def generate_report(request: Request):
             media_type="application/pdf",
             headers={"Content-Disposition": "attachment; filename=LexGuard_Risk_Report.pdf"}
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+    except Exception:
+        logger.exception("PDF generation failed")
+        raise HTTPException(
+            status_code=500,
+            detail="PDF generation failed due to an internal service error.",
+        )
 
 
 @router.get("/health")

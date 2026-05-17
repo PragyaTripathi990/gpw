@@ -14,16 +14,52 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "gemini" or "openai" or "groq"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+_configured_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+
+if _configured_provider:
+    LLM_PROVIDER = _configured_provider
+elif GEMINI_API_KEY:
+    LLM_PROVIDER = "gemini"
+elif OPENAI_API_KEY:
+    LLM_PROVIDER = "openai"
+elif GROQ_API_KEY:
+    LLM_PROVIDER = "groq"
+else:
+    LLM_PROVIDER = "gemini"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ANALYSIS_CONCURRENCY = max(1, int(os.getenv("LEXGUARD_ANALYSIS_CONCURRENCY", "3")))
+MAX_LLM_CLAUSES = max(0, int(os.getenv("LEXGUARD_MAX_LLM_CLAUSES", "6")))
+MAX_CLAUSE_PROMPT_CHARS = max(900, int(os.getenv("LEXGUARD_MAX_CLAUSE_PROMPT_CHARS", "1800")))
+HEURISTIC_SEGMENTATION_MIN_CLAUSES = max(
+    1, int(os.getenv("LEXGUARD_HEURISTIC_SEGMENTATION_MIN_CLAUSES", "3"))
+)
+USE_HEURISTIC_SEGMENTATION_FIRST = _env_flag("LEXGUARD_HEURISTIC_SEGMENTATION_FIRST", True)
+USE_LLM_CONTRADICTIONS = _env_flag("LEXGUARD_USE_LLM_CONTRADICTIONS", False)
+USE_LLM_SUMMARY = _env_flag("LEXGUARD_USE_LLM_SUMMARY", False)
 
 from .prompts import (
     CLAUSE_SEGMENTATION_PROMPT,
     CONTRADICTION_DETECTION_PROMPT,
     OVERALL_SUMMARY_PROMPT,
+)
+from backend.services.heuristic_fallback import (
+    analyze_clause_heuristic,
+    build_document_issues_heuristic,
+    build_executive_summary_heuristic,
+    segment_document_fallback,
 )
 
 # RAG knowledge base (local, no API calls)
@@ -40,6 +76,78 @@ except Exception:
 
 _groq_client = None
 _openai_client = None
+
+
+def _condense_clause_text(text: str, max_chars: int = MAX_CLAUSE_PROMPT_CHARS) -> str:
+    """Shrink long clauses before prompting to reduce token usage."""
+    normalized = (text or "").strip()
+    if len(normalized) <= max_chars:
+        return normalized
+
+    section_len = max(250, (max_chars - 80) // 3)
+    middle_start = max(0, len(normalized) // 2 - section_len // 2)
+    middle_end = middle_start + section_len
+    omitted = max(0, len(normalized) - (section_len * 3))
+
+    return (
+        f"{normalized[:section_len]}\n"
+        f"...[{omitted} characters omitted for faster analysis]...\n"
+        f"{normalized[middle_start:middle_end]}\n"
+        "...[continuing]...\n"
+        f"{normalized[-section_len:]}"
+    )
+
+
+def _should_use_heuristic_segmentation(document_text: str, fallback_clauses: list[dict]) -> bool:
+    """Prefer deterministic segmentation for long, structured contracts."""
+    if not USE_HEURISTIC_SEGMENTATION_FIRST or not fallback_clauses:
+        return False
+    if len(fallback_clauses) >= HEURISTIC_SEGMENTATION_MIN_CLAUSES:
+        return True
+    return len(document_text) > 8000 and len(fallback_clauses) >= 2
+
+
+def _llm_priority_tuple(result: dict) -> tuple[int, int, int]:
+    """Rank clauses so expensive LLM review focuses on the highest-signal issues."""
+    verdict = result.get("verdict", {})
+    score = verdict.get("risk_score", 0) if isinstance(verdict, dict) else 0
+    matched_patterns = result.get("matched_patterns", [])
+    benchmark = result.get("benchmark_comparison")
+    return (
+        int(score),
+        len(matched_patterns),
+        1 if benchmark else 0,
+    )
+
+
+def _select_llm_clause_indices(heuristic_results: list[dict], max_llm_clauses: int = MAX_LLM_CLAUSES) -> list[int]:
+    """Choose which clauses deserve deep LLM analysis."""
+    if max_llm_clauses <= 0 or not heuristic_results:
+        return []
+    if len(heuristic_results) <= max_llm_clauses:
+        return list(range(len(heuristic_results)))
+
+    ranked_indices = sorted(
+        range(len(heuristic_results)),
+        key=lambda idx: _llm_priority_tuple(heuristic_results[idx]),
+        reverse=True,
+    )
+
+    selected: list[int] = []
+    for threshold in (8, 6):
+        for idx in ranked_indices:
+            score = heuristic_results[idx].get("verdict", {}).get("risk_score", 0)
+            if score >= threshold and idx not in selected:
+                selected.append(idx)
+                if len(selected) >= max_llm_clauses:
+                    return sorted(selected)
+
+    for idx in ranked_indices:
+        if idx not in selected:
+            selected.append(idx)
+        if len(selected) >= max_llm_clauses:
+            break
+    return sorted(selected)
 
 def _get_groq():
     global _groq_client
@@ -215,7 +323,7 @@ async def analyze_clause(clause: dict, doc_type: str) -> dict:
         title=clause.get("title", "Unknown"),
         category=clause.get("category", "OTHER"),
         doc_type=doc_type,
-        clause_text=clause.get("text", ""),
+        clause_text=_condense_clause_text(clause.get("text", "")),
         rag_section=rag_section,
     )
     
@@ -247,29 +355,72 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
     
     # Call 1: Segment clauses
     print("[LexGuard] Segmenting clauses...")
-    seg_prompt = CLAUSE_SEGMENTATION_PROMPT.format(document_text=document_text[:15000])
-    clauses = await call_llm_json(seg_prompt)
-    if isinstance(clauses, dict):
-        clauses = clauses.get("clauses", [clauses])
+    fallback_clauses = segment_document_fallback(document_text)
+    clauses = []
+
+    if _should_use_heuristic_segmentation(document_text, fallback_clauses):
+        print("[LexGuard] Using heuristic-first segmentation for faster full-document coverage")
+        clauses = fallback_clauses
+    else:
+        try:
+            seg_prompt = CLAUSE_SEGMENTATION_PROMPT.format(document_text=document_text[:15000])
+            clauses = await call_llm_json(seg_prompt)
+            if isinstance(clauses, dict):
+                clauses = clauses.get("clauses", [clauses])
+            if not isinstance(clauses, list):
+                clauses = []
+        except Exception as e:
+            print(f"[LexGuard] Clause segmentation failed, using fallback: {e}")
+            clauses = []
+
+        clauses = [
+            {
+                **clause,
+                "clause_number": clause.get("clause_number", i + 1),
+                "title": clause.get("title", f"Clause {i + 1}"),
+                "text": clause.get("text", ""),
+                "category": clause.get("category", "OTHER"),
+            }
+            for i, clause in enumerate(clauses)
+            if isinstance(clause, dict) and clause.get("text")
+        ]
+
+        if not clauses:
+            clauses = fallback_clauses
+        elif len(document_text) > 15000 and len(fallback_clauses) > len(clauses):
+            print("[LexGuard] Using heuristic segmentation for better full-document coverage")
+            clauses = fallback_clauses
     print(f"[LexGuard] Found {len(clauses)} clauses")
     
-    # Calls 2..N: Analyze each clause (1 call each)
-    results = []
-    for i, clause in enumerate(clauses):
-        print(f"[LexGuard] Analyzing clause {i+1}/{len(clauses)}: {clause.get('title', '?')}")
+    # Calls 2..N: Analyze highest-signal clauses deeply, keep heuristics for the rest
+    heuristic_results = [analyze_clause_heuristic(clause, doc_type) for clause in clauses]
+    selected_llm_indices = _select_llm_clause_indices(heuristic_results)
+    print(
+        f"[LexGuard] Deep-reviewing {len(selected_llm_indices)}/{len(clauses)} clauses "
+        f"with LLM (concurrency={ANALYSIS_CONCURRENCY})"
+    )
+
+    results = list(heuristic_results)
+
+    async def _analyze_selected_clause(idx: int):
+        clause = clauses[idx]
+        print(f"[LexGuard] Deep analysis for clause {idx+1}/{len(clauses)}: {clause.get('title', '?')}")
         try:
-            r = await analyze_clause(clause, doc_type)
-            results.append(r)
+            return idx, await analyze_clause(clause, doc_type)
         except Exception as e:
-            print(f"[LexGuard] Clause {i+1} failed: {e}")
-            results.append({
-                "clause": clause, "defense": "", "prosecution": "",
-                "verdict": {"risk_score": 5, "risk_types": [], "verdict": "Analysis failed",
-                            "plain_english": "Could not analyze this clause", "suggested_fix": "N/A",
-                            "real_world_impact": "", "defense_validity": 0, "prosecution_validity": 0},
-                "simple_explanation": "", "scenarios": [], "negotiation_advice": {},
-                "benchmark_comparison": None, "matched_patterns": [],
-            })
+            print(f"[LexGuard] Clause {idx+1} failed, keeping heuristic fallback: {e}")
+            return idx, heuristic_results[idx]
+
+    if selected_llm_indices:
+        semaphore = asyncio.Semaphore(ANALYSIS_CONCURRENCY)
+
+        async def _bounded(idx: int):
+            async with semaphore:
+                return await _analyze_selected_clause(idx)
+
+        llm_results = await asyncio.gather(*[_bounded(idx) for idx in selected_llm_indices])
+        for idx, clause_result in llm_results:
+            results[idx] = clause_result
     
     # Compute scores
     risk_scores = []
@@ -293,12 +444,13 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
     
     # Call N+1: Contradiction detection
     print("[LexGuard] Detecting contradictions...")
-    contradictions = {"contradictions": [], "ambiguities": [], "missing_protections": [], "unusual_terms": []}
-    try:
-        all_text = "\n".join([f"CLAUSE {c.get('clause_number', i+1)}: {c.get('title', '?')} - {c.get('text', '')[:300]}" for i, c in enumerate(clauses)])
-        contradictions = await call_llm_json(CONTRADICTION_DETECTION_PROMPT.format(all_clauses_text=all_text[:6000]))
-    except Exception:
-        pass
+    contradictions = build_document_issues_heuristic(clauses, results)
+    if USE_LLM_CONTRADICTIONS and clauses:
+        try:
+            all_text = "\n".join([f"CLAUSE {c.get('clause_number', i+1)}: {c.get('title', '?')} - {c.get('text', '')[:300]}" for i, c in enumerate(clauses)])
+            contradictions = await call_llm_json(CONTRADICTION_DETECTION_PROMPT.format(all_clauses_text=all_text[:6000]))
+        except Exception as e:
+            print(f"[LexGuard] Contradiction detection failed, using heuristic fallback: {e}")
     
     # Call N+2: Executive summary
     print("[LexGuard] Generating summary...")
@@ -306,11 +458,16 @@ async def analyze_document(document_text: str, doc_type: str = "General Contract
         f"- {r['clause']['title']} ({r['verdict'].get('risk_score', '?')}/10): {r['verdict'].get('plain_english', '')[:200]}"
         for r in sorted(results, key=lambda x: x.get('verdict', {}).get('risk_score', 0) if isinstance(x.get('verdict'), dict) else 0, reverse=True)[:5]
     ])
-    summary = await call_llm_text(OVERALL_SUMMARY_PROMPT.format(
-        doc_type=doc_type, total_clauses=len(clauses),
-        critical_count=len(critical_issues), warning_count=len(warnings),
-        safe_count=len(safe_clauses), avg_score=f"{avg_score:.1f}", top_risks=top_risks,
-    ))
+    summary = build_executive_summary_heuristic(doc_type, results, avg_score, recommendation)
+    if USE_LLM_SUMMARY and selected_llm_indices:
+        try:
+            summary = await call_llm_text(OVERALL_SUMMARY_PROMPT.format(
+                doc_type=doc_type, total_clauses=len(clauses),
+                critical_count=len(critical_issues), warning_count=len(warnings),
+                safe_count=len(safe_clauses), avg_score=f"{avg_score:.1f}", top_risks=top_risks,
+            ))
+        except Exception as e:
+            print(f"[LexGuard] Summary generation failed, using heuristic fallback: {e}")
     
     print(f"[LexGuard] Done! Grade: {grade}, Score: {avg_score:.1f}/10")
     

@@ -1,87 +1,108 @@
 #!/bin/bash
 # =============================================================
-# LexGuard — Deploy to Google Cloud
+# LexGuard — Deploy to Google Cloud Run
 # =============================================================
 
-set -e
+set -euo pipefail
 
-echo "🛡️ LexGuard Deployment Script"
-echo "=============================="
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEFAULT_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-$DEFAULT_PROJECT}"
+REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
+BACKEND_SERVICE="${BACKEND_SERVICE:-lexguard-api}"
+FRONTEND_SERVICE="${FRONTEND_SERVICE:-lexguard-web}"
+UPLOAD_BUCKET="lexguard-uploads-${PROJECT_ID}"
 
-# CONFIGURATION — Update these!
-PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-your-project-id}"
-REGION="us-central1"
-BACKEND_SERVICE="lexguard-api"
-FRONTEND_BUCKET="lexguard-frontend"
-
-echo "Project: $PROJECT_ID"
-echo "Region: $REGION"
+echo "LexGuard deployment"
+echo "==================="
+echo "Project: ${PROJECT_ID:-<unset>}"
+echo "Region:  $REGION"
 echo ""
 
-# ----- Step 1: Set GCP Project -----
-echo "📌 Setting GCP project..."
-gcloud config set project $PROJECT_ID
+if [[ -z "${PROJECT_ID}" ]]; then
+  echo "ERROR: GOOGLE_CLOUD_PROJECT is not set and gcloud has no active project."
+  exit 1
+fi
 
-# ----- Step 2: Enable APIs -----
-echo "🔧 Enabling required APIs..."
+echo "Setting gcloud project..."
+gcloud config set project "$PROJECT_ID"
+
+echo "Enabling required APIs..."
 gcloud services enable \
-    run.googleapis.com \
-    cloudbuild.googleapis.com \
-    artifactregistry.googleapis.com \
-    documentai.googleapis.com \
-    vision.googleapis.com \
-    translate.googleapis.com \
-    language.googleapis.com \
-    storage.googleapis.com \
-    firestore.googleapis.com \
-    bigquery.googleapis.com \
-    aiplatform.googleapis.com
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
+  documentai.googleapis.com \
+  vision.googleapis.com \
+  translate.googleapis.com \
+  language.googleapis.com \
+  storage.googleapis.com \
+  firestore.googleapis.com \
+  aiplatform.googleapis.com
 
-# ----- Step 3: Create GCS Bucket -----
-echo "📦 Creating Cloud Storage bucket..."
-gsutil mb -l $REGION gs://lexguard-uploads-$PROJECT_ID 2>/dev/null || echo "Bucket exists"
+echo "Ensuring upload bucket exists..."
+gcloud storage buckets create "gs://${UPLOAD_BUCKET}" --location="$REGION" >/dev/null 2>&1 || true
 
-# ----- Step 4: Build & Deploy Backend to Cloud Run -----
-echo "🚀 Building and deploying backend to Cloud Run..."
-cd backend
+BACKEND_ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},GCS_BUCKET_NAME=${UPLOAD_BUCKET}"
+BACKEND_SECRET_FLAGS=()
 
-gcloud run deploy $BACKEND_SERVICE \
-    --source . \
-    --region $REGION \
-    --platform managed \
-    --allow-unauthenticated \
-    --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,GCS_BUCKET_NAME=lexguard-uploads-$PROJECT_ID" \
-    --set-secrets="GEMINI_API_KEY=gemini-api-key:latest" \
-    --memory 2Gi \
-    --cpu 2 \
-    --timeout 300 \
-    --min-instances 0 \
-    --max-instances 10
+if gcloud secrets describe gemini-api-key --project "$PROJECT_ID" >/dev/null 2>&1; then
+  echo "Using Secret Manager secret: gemini-api-key"
+  BACKEND_SECRET_FLAGS=(--set-secrets "GEMINI_API_KEY=gemini-api-key:latest")
+elif [[ -n "${GEMINI_API_KEY:-}" ]]; then
+  echo "Using GEMINI_API_KEY from the current shell environment"
+  BACKEND_ENV_VARS="${BACKEND_ENV_VARS},GEMINI_API_KEY=${GEMINI_API_KEY}"
+else
+  echo "No Gemini secret found. Backend will still deploy and use deterministic fallback mode."
+fi
 
-# Get the backend URL
-BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)')
-echo "✅ Backend deployed at: $BACKEND_URL"
+echo "Deploying backend to Cloud Run..."
+cd "${ROOT_DIR}/backend"
+gcloud run deploy "$BACKEND_SERVICE" \
+  --source . \
+  --region "$REGION" \
+  --platform managed \
+  --allow-unauthenticated \
+  --set-env-vars="$BACKEND_ENV_VARS" \
+  "${BACKEND_SECRET_FLAGS[@]}" \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 300 \
+  --min-instances 0 \
+  --max-instances 10
 
-cd ..
+BACKEND_URL="$(gcloud run services describe "$BACKEND_SERVICE" --region "$REGION" --format='value(status.url)')"
+echo "Backend URL: $BACKEND_URL"
 
-# ----- Step 5: Build & Deploy Frontend to Firebase -----
-echo "🌐 Building and deploying frontend..."
-cd frontend
+echo "Deploying frontend to Cloud Run..."
+cd "${ROOT_DIR}/frontend"
+gcloud run deploy "$FRONTEND_SERVICE" \
+  --source . \
+  --region "$REGION" \
+  --platform managed \
+  --allow-unauthenticated \
+  --set-build-env-vars="NEXT_PUBLIC_API_URL=${BACKEND_URL}" \
+  --set-env-vars="NEXT_PUBLIC_API_URL=${BACKEND_URL}" \
+  --memory 1Gi \
+  --cpu 1 \
+  --timeout 120 \
+  --min-instances 0 \
+  --max-instances 3
 
-# Set the backend URL for the frontend
-echo "NEXT_PUBLIC_API_URL=$BACKEND_URL" > .env.local
+FRONTEND_URL="$(gcloud run services describe "$FRONTEND_SERVICE" --region "$REGION" --format='value(status.url)')"
+echo "Frontend URL: $FRONTEND_URL"
 
-npm run build
-
-# Deploy to Firebase Hosting
-firebase deploy --only hosting
-
-cd ..
+echo "Updating backend with explicit frontend origin..."
+cd "${ROOT_DIR}/backend"
+gcloud run services update "$BACKEND_SERVICE" \
+  --region "$REGION" \
+  --update-env-vars="ADDITIONAL_ALLOWED_ORIGINS=${FRONTEND_URL}"
 
 echo ""
-echo "================================================"
-echo "🎉 LexGuard deployed successfully!"
-echo "================================================"
+echo "=============================================="
+echo "LexGuard deployed successfully"
+echo "=============================================="
 echo "Backend API: $BACKEND_URL"
-echo "Frontend:    Check Firebase Hosting URL above"
-echo "================================================"
+echo "Frontend:    $FRONTEND_URL"
+echo "=============================================="

@@ -2,6 +2,7 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from backend.main import app
+from backend.routers import analyze as analyze_router
 
 
 @pytest.fixture
@@ -65,3 +66,55 @@ async def test_javascript_url_rejected(transport):
             data={"url": "javascript:alert(1)", "doc_type": "General Contract"},
         )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_localhost_url_rejected(transport):
+    """Loopback-style hosts should be rejected."""
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/analyze",
+            data={"url": "http://localhost.localdomain/secrets", "doc_type": "General Contract"},
+        )
+    assert response.status_code == 400
+    assert "Invalid URL" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_private_dns_helper_url_rejected(transport):
+    """Dynamic DNS domains pointing to private IPs should be rejected."""
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/analyze",
+            data={"url": "http://127.0.0.1.nip.io", "doc_type": "General Contract"},
+        )
+    assert response.status_code == 400
+    assert "Invalid URL" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_errors_are_sanitized(transport, monkeypatch):
+    """Unexpected failures should not leak internals to clients."""
+
+    async def fake_parse_document(*, raw_text=None, **kwargs):
+        return {
+            "text": raw_text or "",
+            "pages": 1,
+            "entities": [],
+            "method": "plain_text",
+            "language_info": {"original_language": "en", "was_translated": False},
+        }
+
+    async def fake_analyze_document(document_text: str, doc_type: str):
+        raise RuntimeError("secret token 123")
+
+    monkeypatch.setattr(analyze_router, "parse_document", fake_parse_document)
+    monkeypatch.setattr(analyze_router, "analyze_document", fake_analyze_document)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/analyze",
+            data={"raw_text": "test clause", "doc_type": "General Contract"},
+        )
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Analysis failed due to an internal service error."

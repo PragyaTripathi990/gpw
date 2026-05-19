@@ -1,90 +1,127 @@
-# 🛡️ LEXGUARD — AI Rights & Contract Intelligence System
+# LexGuard
 
-> **Adversarial multi-agent AI that analyzes contracts to detect exploitative clauses, hidden liabilities, and real-world risks before users agree to them.**
+**AI-Powered Adversarial Contract Intelligence Platform**
 
-## 🏗️ Architecture
+Analyze contracts for exploitative clauses using a multi-agent debate architecture powered by Gemini 2.5. Upload PDFs, DOCX, images, URLs, or raw text in any language --- LexGuard extracts clauses, runs adversarial analysis, and produces explainable risk scores with fair alternative suggestions.
+
+**[Live Demo](https://lexguard-frontend-712213214076.us-central1.run.app/)**
+
+---
+
+## Architecture
 
 ```
-User uploads document
-        │
-        ▼
-┌───────────────┐     ┌──────────────────┐     ┌──────────────┐
-│ Google Doc AI │     │ Cloud Vision OCR │     │ Cloud Transl │
-│ (PDF parsing) │     │ (Image → Text)   │     │ (Multi-lang) │
-└───────┬───────┘     └────────┬─────────┘     └──────┬───────┘
-        └──────────────────────┼──────────────────────┘
-                               ▼
-                 ┌──────────────────────────┐
-                 │  Clause Segmentation     │
-                 │  (Gemini 2.5 Flash)      │
-                 └────────────┬─────────────┘
-                              ▼
-            ╔═══════════════════════════════════╗
-            ║  ADVERSARIAL MULTI-AGENT DEBATE   ║
-            ║                                   ║
-            ║  🏢 Agent 1: Corporate Lawyer     ║
-            ║  🛡️ Agent 2: Consumer Advocate     ║
-            ║  ⚖️ Agent 3: Neutral Judge         ║
-            ║  📝 Agent 4: Plain English         ║
-            ║                                   ║
-            ║  All powered by Gemini 2.5 Pro    ║
-            ╚═══════════════════════════════════╝
-                              ▼
-                 ┌──────────────────────────┐
-                 │ Risk Scoring + Reporting │
-                 │ Optional Cloud Storage   │
-                 └──────────────────────────┘
+User Input (PDF / DOCX / Image / URL / Text)
+                |
+                v
+    +--- Document Pipeline ---+
+    |                          |
+    v                          v
+Google Document AI       Cloud Vision OCR
+    |                          |
+    +-------> Cloud Translation API
+                    |
+                    v
+            Clause Extraction
+            (Firestore + Cloud Storage)
+                    |
+                    v
+    +--- 4-Agent Debate System ---+
+    |       |        |        |
+    v       v        v        v
+ Lawyer  Consumer  Judge  Translator
+ Agent   Advocate  Agent    Agent
+    |       |        |        |
+    +-------+--------+--------+
+                |
+                v
+        Risk Scoring Engine
+        (Adaptive Triaging +
+         Deterministic Fallback)
+                |
+                v
+        Explainable Report
+        (Risk Scores + Fair Alternatives)
 ```
 
-## 🔧 Cloud Capabilities Used
+## How It Works
 
-| # | Service | Purpose |
-|---|---------|---------|
-| 1 | **Gemini 2.5 Pro** | Multi-agent adversarial analysis |
-| 2 | **Gemini 2.5 Flash** | Clause segmentation & simplification |
-| 3 | **Google Document AI** | Premium PDF/document parsing |
-| 4 | **Cloud Vision API** | OCR for images of contracts |
-| 5 | **Cloud Translation API** | Multi-language contract support |
-| 6 | **Cloud Storage** | Optional upload persistence |
-| 7 | **Firestore** | Optional result persistence |
-| 8 | **Cloud Run** | Backend deployment |
-| 9 | **Firebase Hosting** | Frontend deployment |
+### 1. Document Ingestion
+- **PDFs/DOCX**: Parsed via Google Document AI for structured text extraction
+- **Images**: Cloud Vision OCR for text recognition
+- **Multilingual**: Cloud Translation API normalizes all input to English for analysis
+- **Storage**: Raw documents in Cloud Storage, extracted clauses in Firestore
 
-## 🚀 Quick Start
+### 2. Adversarial Multi-Agent Analysis
+Four specialized agents debate each clause:
+
+| Agent | Role |
+|---|---|
+| **Lawyer Agent** | Identifies legal risks, flags ambiguous language, checks regulatory compliance |
+| **Consumer Advocate** | Detects exploitative terms, unfair conditions, hidden obligations |
+| **Judge Agent** | Weighs arguments, assigns final risk score, resolves conflicts |
+| **Translator Agent** | Ensures multilingual inputs are accurately interpreted in context |
+
+### 3. Risk Scoring
+- **Adaptive clause triaging**: High-risk clauses get deeper multi-agent analysis; low-risk clauses use deterministic scoring
+- **Explainable output**: Every risk score includes reasoning from each agent
+- **Fair alternatives**: Generates rewritten clause suggestions that balance both parties
+
+## Key Features
+
+| Feature | Details |
+|---|---|
+| Multi-format Input | PDF, DOCX, images, URLs, raw text |
+| Multilingual Support | Auto-translation via Cloud Translation API |
+| 4-Agent Debate | Adversarial analysis for balanced risk assessment |
+| Adaptive Triaging | Reduces inference cost by routing low-risk clauses to deterministic scoring |
+| Explainable Scoring | Per-clause reasoning with agent attribution |
+| Fair Alternatives | AI-generated balanced clause rewrites |
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Backend** | Python, FastAPI |
+| **AI** | Gemini 2.5 Pro/Flash |
+| **Document Processing** | Google Document AI, Cloud Vision OCR |
+| **Translation** | Google Cloud Translation API |
+| **Database** | Firestore |
+| **Storage** | Google Cloud Storage |
+| **Frontend** | Next.js |
+| **Deployment** | Cloud Run, Firebase Hosting |
+
+## Setup
+
+### Prerequisites
+- Python 3.10+
+- Google Cloud project with enabled APIs (Document AI, Vision, Translation, Firestore)
+- Gemini API key
 
 ### Backend
 ```bash
-cd lexguard
-pip install -r backend/requirements.txt
-# Set your environment variables
-export GEMINI_API_KEY=your-key
-export GOOGLE_CLOUD_PROJECT=your-project
-# Run
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # Add GCP credentials + Gemini key
+uvicorn main:app --reload
 ```
 
 ### Frontend
 ```bash
-cd lexguard/frontend
+cd frontend
 npm install
-echo "NEXT_PUBLIC_API_URL=http://localhost:8080" > .env.local
+cp .env.example .env
 npm run dev
 ```
 
-## 📸 Features
+## Deployment
 
-- **Upload any format**: PDF, DOCX, Images (OCR), URLs, plain text
-- **Multi-language**: Automatically detects and translates non-English contracts
-- **Adversarial Debate**: 6 expert roles analyze each clause from opposing perspectives
-- **Adaptive Deep Review**: Heuristic triage sends only the highest-risk clauses through expensive LLM analysis for faster results
-- **Deterministic Fallback**: Rule-based clause scoring keeps the system useful even when external AI services are unavailable
-- **Risk Scoring**: Per-clause and overall risk scores (1-10)
-- **Top Red Flags**: High-signal issues are ranked for instant review by judges or users
-- **Plain English**: Every clause translated to simple language anyone can understand
-- **Suggested Fixes**: AI-generated fairer alternatives for risky clauses
-- **Benchmark Comparison**: Clauses are compared against known fair contract patterns
-- **Beautiful Dashboard**: Interactive visualization of all findings
+- **Backend**: Deployed on Google Cloud Run
+- **Frontend**: Firebase Hosting
+- **Live**: [lexguard-frontend-712213214076.us-central1.run.app](https://lexguard-frontend-712213214076.us-central1.run.app/)
 
-## 👥 Team
+## License
 
-Built for live hackathon judging and contract-risk demos.
+MIT
